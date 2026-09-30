@@ -1,0 +1,24 @@
+[project]
+name = "bridge"
+version = "0.1.0"
+description = "Directory-based agent environment: inherited workspace profiles, agent identity, MCP memory, NATS activity reporting"
+requires-python = ">=3.11"
+dependencies = [
+    "nats-py>=2.6",
+    "mcp>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+bridge = "bridge.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

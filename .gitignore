@@ -1,0 +1,28 @@
+# Python build and test output
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# Machine/session state and secrets
+.bridge/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.db
+
+# Existing non-Bridge payloads in this workspace; keep secrets/runtime data
+# out of the standalone Bridge repository.
+/services/
+/stage/
+/decommission.log
+/NOTES.md
+/the-net-docs.zip
+/the-net-history.bundle
+/.remember/
+/bin/health
