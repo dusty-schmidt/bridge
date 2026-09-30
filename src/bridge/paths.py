@@ -56,6 +56,10 @@ def collector_db() -> Path:
     return state_dir() / "collector.db"
 
 
+def secrets_file() -> Path:
+    return state_dir() / "secrets.env"
+
+
 def ensure_state() -> Path:
     d = state_dir()
     d.mkdir(parents=True, exist_ok=True, mode=0o700)

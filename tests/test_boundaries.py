@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import threading
 import time
 
-from bridge import identity
+from bridge import identity, secrets
 from bridge.collector import store
 from bridge.collector.report import query_dimension
 from bridge.cli import main
 from bridge.launcher import plan
 from bridge.memory.backend import Scope, SqliteMemory
 from bridge.memory.session import SessionError, SessionMemory, _load_session
-from bridge.profile import effective, redacted_view
+from bridge.profile import ProfileError, effective, redacted_view
 from bridge.telemetry import Reporter, make_event
 from bridge.telemetry import outbox
 from bridge.telemetry.wrapper import instrument_call
@@ -36,6 +37,28 @@ def test_profile_merges_maps_and_replaces_lists(tmp_path):
     assert eff.chain.declared_root == root
     assert eff.data["instructions"]["files"] == ["CHILD.md"]
     assert eff.mcp_servers == {"beta": {"command": "two"}}
+
+
+def test_profile_without_declared_root_fails_loudly(tmp_path):
+    workspace = tmp_path / "tree"
+    profile(workspace, "instructions:\n  text: no root declared\n")
+
+    try:
+        effective(workspace)
+    except ProfileError as exc:
+        assert "root: true" in str(exc)
+    else:
+        raise AssertionError("undeclared root should raise ProfileError, not silently fall back")
+
+
+def test_no_profile_anywhere_uses_defaults_without_error(tmp_path):
+    workspace = tmp_path / "bare"
+    workspace.mkdir()
+
+    eff = effective(workspace)
+
+    assert eff.chain.declared_root is None
+    assert eff.chain.notes == ["no .bridge/profile.yaml found; built-in defaults apply"]
 
 
 def test_memory_is_workspace_local_until_approved_and_quarantine_is_hidden(tmp_path):
@@ -250,6 +273,42 @@ def test_memory_server_requires_trusted_session_file(monkeypatch):
         assert "bridge launch" in str(exc)
     else:
         raise AssertionError("missing session file should fail clearly")
+
+
+def test_secrets_env_loads_without_overriding_already_exported_vars(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRACKER_TOKEN", raising=False)
+    monkeypatch.delenv("OTHER_KEY", raising=False)
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    secrets_path = secrets.ensure_file()
+    secrets_path.write_text(
+        "# comment, and a blank line above should be skipped\nTRACKER_TOKEN=from-file\nOTHER_KEY=also-from-file\n",
+        encoding="utf-8",
+    )
+
+    env: dict[str, str] = {"TRACKER_TOKEN": "already-exported"}
+    applied = secrets.load(env)
+
+    assert env["TRACKER_TOKEN"] == "already-exported"
+    assert env["OTHER_KEY"] == "also-from-file"
+    assert applied == ["OTHER_KEY"]
+    assert stat.S_IMODE(secrets_path.stat().st_mode) == 0o600
+
+
+def test_secrets_env_missing_file_is_a_silent_no_op(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    assert secrets.load({}) == []
+
+
+def test_cli_auto_loads_secrets_env_at_startup(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    secrets.ensure_file().write_text("PRIVATE_KEY=from-secrets-env\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    profile(workspace, "root: true\n")
+
+    assert main(["config", "show", "-C", str(workspace)]) == 0
+    assert os.environ.get("PRIVATE_KEY") == "from-secrets-env"
 
 
 def test_config_cli_prints_effective_profile_with_secret_references_redacted(tmp_path, monkeypatch, capsys):

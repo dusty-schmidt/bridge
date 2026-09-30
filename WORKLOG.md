@@ -37,6 +37,34 @@ Ship a standalone Python CLI that launches Claude Code from inherited workspace 
 - MCP server without a session file exits with the expected actionable message; covered by a boundary test.
 - NATS outage/recovery and deduplication are tested with a deterministic publisher and collector SQLite store. The shared live NATS server was not used during tests.
 
+## 2026-09-30 follow-up: secrets auto-load
+
+Reconciled a gap flagged in `REFS/2026-09-30-claude-brainstorm-session.md` between the brainstorm
+design and what had shipped: profiles resolved `${ENV_VAR}` from the process environment, but
+nothing populated that environment, so every secret still needed a manual `export`. Added
+`bridge.secrets` (`~/.bridge/secrets.env`, mode 600, `KEY=VALUE`, comments with `#`) auto-loaded at
+the top of `cli.main()`, never overriding a variable already exported. Covered by three new tests in
+`tests/test_boundaries.py`; `.venv/bin/pytest -q` — 15 passed. Documented in `README.md` under
+"Secrets".
+
+## 2026-09-30 follow-up: resolved the two open design/build discrepancies
+
+Both remaining items flagged in `REFS/2026-09-30-claude-brainstorm-session.md` decided (owner had no
+standing preference, asked for a decision):
+
+- **Root fallback → fail loudly.** `profile.chain_for` now raises `ProfileError` when a directory has
+  a `.bridge/profile.yaml` but no ancestor declares `root: true`, instead of silently using the
+  topmost profile found with just a note. Reasoning: a workspace inheriting the wrong tree's config
+  with no error is worse than a one-line failure naming the fix. Two new tests
+  (`test_profile_without_declared_root_fails_loudly`, `test_no_profile_anywhere_uses_defaults_without_error`);
+  README's profile-discovery paragraph updated. `.venv/bin/pytest -q` — 17 passed.
+- **Command taxonomy → keep Codex's flat CLI, no `agent` namespace, no lifecycle verbs.** The
+  brainstorm session's proposed `bridge up/down/restart/build` describe features that don't exist yet
+  (no service manager; the collector is still a foreground command) — adding that namespace now would
+  be a rename with nothing behind it. Ratifying the shipped, tested, documented flat taxonomy
+  (`bridge launch/child/config/memory/outbox/collector`) is the call that avoids building ahead of
+  need. No code change; this is the taxonomy decision recorded.
+
 ## Repository boundary
 
 The Git root is `/home/ds/bridge`. Pre-existing `services/`, `stage/`, `.remember/`, `NOTES.md`, archive bundles, and runtime artifacts are ignored and were left untouched; no `.GOB` repository files were changed.

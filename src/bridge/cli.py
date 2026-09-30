@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from . import identity, paths
+from . import identity, paths, secrets
 from .collector import store
 from .collector.report import DIMS, format_report, report as build_report
 from .launcher import LaunchError, _expand_env, launch, plan
@@ -199,6 +199,7 @@ def _main(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    secrets.load(os.environ)
     parser = _parser()
     args = parser.parse_args(argv)
     try:

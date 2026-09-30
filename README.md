@@ -37,7 +37,7 @@ The launcher starts Claude Code in the original directory and injects the effect
 
 ## Workspace profiles
 
-Each profile is `.bridge/profile.yaml`. Any directory can declare a root with `root: true`; discovery walks upward from the launch directory and stops at the nearest declared root. Profiles between that root and the launch directory are merged from parent to child. If no profile declares a root, the topmost profile found is used with a note in `bridge config show`.
+Each profile is `.bridge/profile.yaml`. Any directory can declare a root with `root: true`; discovery walks upward from the launch directory and stops at the nearest declared root. Profiles between that root and the launch directory are merged from parent to child. A directory with no `.bridge/profile.yaml` anywhere in its ancestry uses the built-in defaults. A directory that has a profile but no ancestor declares `root: true` is a configuration error and `bridge` exits with a message naming the undeclared profile — it never silently inherits a tree it wasn't told to.
 
 Merge rules:
 
@@ -165,6 +165,16 @@ bridge outbox flush
 ```
 
 Machine-local state lives under `~/.bridge/` (override with `BRIDGE_STATE_DIR`). Session files, generated MCP configuration, and instruction snapshots are private files. Workspace profiles should contain environment-variable references rather than secret values.
+
+### Secrets
+
+`bridge` auto-loads `~/.bridge/secrets.env` (`KEY=VALUE` per line, `#` comments allowed) into its process environment on every invocation, before resolving any `${ENV_NAME}` reference — no `export` required. A variable already present in the environment always wins over the file. Create it once:
+
+```sh
+touch ~/.bridge/secrets.env && chmod 600 ~/.bridge/secrets.env
+```
+
+The file is outside any Git repository by construction (it lives under `BRIDGE_STATE_DIR`, not a workspace), so there is nothing to gitignore.
 
 ## Verification and known gaps
 

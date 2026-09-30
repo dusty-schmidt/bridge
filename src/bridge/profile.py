@@ -93,9 +93,12 @@ class Chain:
 def chain_for(start: str | Path) -> Chain:
     """Walk up from ``start`` collecting profiles until a declared root.
 
-    If no directory declares ``root: true``, the topmost profile found is used
-    as the chain top (a note records this). With no profiles at all the chain
-    is empty and the built-in defaults apply.
+    A directory with a profile but no ``root: true`` anywhere in its ancestry
+    is a configuration error, not a fallback: inheriting an undeclared root's
+    profile silently would let a workspace pick up the wrong tree's config
+    with no error. With no profiles at all the chain is empty and the
+    built-in defaults apply — that is not an error, there is simply nothing
+    to inherit.
     """
     start_dir = Path(start).expanduser().resolve()
     if not start_dir.is_dir():
@@ -115,12 +118,14 @@ def chain_for(start: str | Path) -> Chain:
             break
         cur = cur.parent
 
+    if found and declared is None:
+        raise ProfileError(
+            f"{found[0]} declares a profile but no ancestor declares `root: true`; "
+            "add `root: true` to the profile that should anchor this tree"
+        )
+
     found.reverse()  # root first
     chain = Chain(start_dir=start_dir, dirs=found, declared_root=declared)
-    if found and declared is None:
-        chain.notes.append(
-            f"no profile declares `root: true`; using {found[0]} as chain top"
-        )
     if not found:
         chain.notes.append("no .bridge/profile.yaml found; built-in defaults apply")
     chain.profiles = [read_profile(d) or {} for d in chain.dirs]
