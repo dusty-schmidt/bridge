@@ -106,6 +106,8 @@ bridge launch [--model MODEL] [--role ROLE] [--task TASK] [-- APP_ARGS...]
 bridge child [--parent AGENT_ID] [--model MODEL] [--task TASK] [-- APP_ARGS...]
 ```
 
+`bridge ps` lists agents with active sessions and each one's working directory (`--all` includes ended/error sessions).
+
 `bridge child` defaults to the current `BRIDGE_AGENT_ID`, inherits its task and saved profile, and marks the new agent as a subagent through its parent ID. Use it in a shell started by the launched agent, or pass `--parent`. Claude Code's native Task subagents are not separately instrumented by Bridge; their activity remains attributed to the Claude Code session that owns them.
 
 Typical session commands:

@@ -6,6 +6,9 @@ Versioning: [SemVer](https://semver.org/). Release with `scripts/bump_version.py
 
 ## [Unreleased]
 
+### Added
+- `bridge ps` — lists agents with active sessions and their working directory.
+
 ## [0.0.1] - 2026-09-30
 
 ### Added

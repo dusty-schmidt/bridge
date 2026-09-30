@@ -68,6 +68,9 @@ def _parser() -> argparse.ArgumentParser:
     outbox_sub.add_parser("status")
     outbox_sub.add_parser("flush")
 
+    ps_p = commands.add_parser("ps", help="list agents with active sessions and their working directory")
+    ps_p.add_argument("--all", action="store_true", help="include ended/error sessions too")
+
     collector_p = commands.add_parser("collector", help="run collector and inspect its report")
     collector_sub = collector_p.add_subparsers(dest="collector_command", required=True)
     run_p = collector_sub.add_parser("run")
@@ -155,6 +158,26 @@ def _status(summary_words: list[str]) -> int:
     return 0
 
 
+def _ps(show_all: bool) -> int:
+    sessions = identity.list_sessions()
+    if not show_all:
+        sessions = [s for s in sessions if s.status == "active"]
+    if not sessions:
+        print("no active agents")
+        return 0
+    rows = [
+        (s.agent_id, identity.effective_status(s), s.role, s.start_dir)
+        for s in sessions
+    ]
+    w_id = max(len("AGENT"), *(len(r[0]) for r in rows))
+    w_status = max(len("STATUS"), *(len(r[1]) for r in rows))
+    w_role = max(len("ROLE"), *(len(r[2]) for r in rows))
+    print(f"{'AGENT':<{w_id}}  {'STATUS':<{w_status}}  {'ROLE':<{w_role}}  CWD")
+    for agent_id, status, role, cwd in rows:
+        print(f"{agent_id:<{w_id}}  {status:<{w_status}}  {role:<{w_role}}  {cwd}")
+    return 0
+
+
 def _main(args: argparse.Namespace) -> int:
     if args.command == "launch":
         return _launch(args)
@@ -166,6 +189,8 @@ def _main(args: argparse.Namespace) -> int:
         return 0
     if args.command == "status":
         return _status(args.summary)
+    if args.command == "ps":
+        return _ps(args.all)
     if args.command == "memory":
         return _memory(args)
     if args.command == "outbox":

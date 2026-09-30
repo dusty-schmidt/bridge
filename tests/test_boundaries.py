@@ -324,6 +324,37 @@ def test_cli_auto_loads_secrets_env_at_startup(tmp_path, monkeypatch, capsys):
     assert os.environ.get("PRIVATE_KEY") == "from-secrets-env"
 
 
+def test_ps_lists_only_active_agents_with_their_cwd(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    active = identity.Identity(
+        agent_id="ag-active", session_id="s1", workspace_id="ws", tree_id="tree",
+        root_dir=str(tmp_path), start_dir=str(tmp_path / "workdir"), parent_agent_id=None,
+        task_id=None, role="developer", model="sonnet", app="claude-code", client="claude",
+        profile_version="v1",
+    )
+    ended = identity.Identity(
+        agent_id="ag-ended", session_id="s2", workspace_id="ws", tree_id="tree",
+        root_dir=str(tmp_path), start_dir=str(tmp_path / "other"), parent_agent_id=None,
+        task_id=None, role="developer", model="sonnet", app="claude-code", client="claude",
+        profile_version="v1", status="ended",
+    )
+    identity.record(active)
+    identity.record(ended)
+
+    assert main(["ps"]) == 0
+    output = capsys.readouterr().out
+    assert "ag-active" in output
+    assert str(tmp_path / "workdir") in output
+    assert "ag-ended" not in output
+
+
+def test_ps_with_no_active_agents_says_so(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+
+    assert main(["ps"]) == 0
+    assert capsys.readouterr().out.strip() == "no active agents"
+
+
 def test_config_cli_prints_effective_profile_with_secret_references_redacted(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("PRIVATE_KEY", "do-not-print-this")
