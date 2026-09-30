@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from .util import redact
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bridge", description="Directory-bound agent workspace toolkit")
-    parser.add_argument("--version", action="version", version="bridge 0.1.0")
+    parser.add_argument("--version", action="version", version=f"bridge {_pkg_version('bridge')}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     launch_p = commands.add_parser("launch", help="launch Claude Code with this directory's profile")
