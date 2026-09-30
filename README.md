@@ -138,6 +138,19 @@ bridge memory forget MEMORY_ID
 
 Memory calls are instrumented automatically. Telemetry records operation, IDs/counts, outcome and duration, never memory contents or recall queries.
 
+## Docs MCP
+
+- Profile section `docs.routes.<kind>` maps a kind to a `path` (append/replace) or a `command` (message substituted as one argv token, not shell-interpolated).
+- Bundled tool `document(kind, message)`, present only when `docs.routes` is non-empty.
+- Unknown `kind` fails loudly, listing known kinds.
+- Relative paths and command working directory resolve against the workspace, never the process's cwd.
+
+## Session git branch
+
+- `bridge launch` checks out `bridge/<agent_id>` off the current branch (top-level launches only, not `bridge child`).
+- Session end auto-commits any uncommitted changes to that branch. Never pushes, never merges, never touches the branch you started on.
+- Opt out per profile: `git.auto_branch: false`.
+
 ## NATS activity and collector
 
 Bridge reuses the existing NATS server; it does not start another server. Its defaults target the fleet-bus address (`nats://100.115.32.6:4222`), `BRIDGE` JetStream stream, and `bridge.>` subject namespace. Set `nats.url` in the profile or `BRIDGE_NATS_URL` in the environment. Bridge does not change fleet-bus server configuration.
@@ -192,3 +205,8 @@ The focused tests cover profile inheritance/list replacement, per-workspace memo
 - [Claude Code MCP configuration](https://docs.anthropic.com/en/docs/claude-code/mcp)
 - [Official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)
 - [NATS JetStream](https://docs.nats.io/learn/jetstream/)
+
+## More
+
+- `CHANGELOG.md` — what changed, by date.
+- `docs/` — architecture and decision records ([index](docs/README.md)).

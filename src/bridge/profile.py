@@ -36,6 +36,8 @@ DEFAULTS: dict[str, Any] = {
     "instructions": {"files": [], "text": ""},
     "mcp": {"servers": {}},
     "memory": {"backend": "sqlite", "scope": "root_tree", "top_k": 5, "mcp": True},
+    "docs": {"routes": {}},
+    "git": {"auto_branch": True},
     "nats": {
         "url": "nats://100.115.32.6:4222",
         "stream": "BRIDGE",
@@ -203,6 +205,14 @@ class EffectiveProfile:
     @property
     def mcp_servers(self) -> dict[str, Any]:
         return dict((self.data.get("mcp") or {}).get("servers") or {})
+
+    @property
+    def docs(self) -> dict[str, Any]:
+        return dict(DEFAULTS["docs"], **(self.data.get("docs") or {}))
+
+    @property
+    def git(self) -> dict[str, Any]:
+        return dict(DEFAULTS["git"], **(self.data.get("git") or {}))
 
     @property
     def agent(self) -> dict[str, Any]:

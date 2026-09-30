@@ -10,7 +10,9 @@ profile → identity → launch → (memory MCP, telemetry) → collector
 
 - `profile.py` — discovers and merges `.bridge/profile.yaml` up to a declared root.
 - `identity.py` — SQLite table of every agent session; parent/child links.
-- `launcher.py` — resolves profile + identity into a session, execs the client.
+- `launcher.py` — resolves profile + identity into a session, execs the client, owns the git session-branch/auto-commit.
+- `gitops.py` — branch/commit primitives used by the launcher.
+- `docs.py` / `docs_mcp.py` — routing-table-driven `document(kind, message)` MCP tool.
 - `secrets.py` — auto-loads `~/.bridge/secrets.env` into the process environment.
 - `paths.py` — machine-local state layout (`~/.bridge/`, override `BRIDGE_STATE_DIR`).
 - `util.py` — id generation, redaction, hashing helpers.

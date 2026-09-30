@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import gitops
 from . import identity as ids
 from . import paths
 from .profile import Chain, EffectiveProfile, effective, ProfileError
@@ -219,13 +220,15 @@ def plan(
             "profiles": eff.chain.profiles,
         },
         "external_mcp_servers": {
-            key: value for key, value in external_servers.items() if key != "bridge-memory"
+            key: value for key, value in external_servers.items()
+            if key not in ("bridge-memory", "bridge-docs")
         },
         "chain": [str(d) for d in eff.chain.dirs],
         "root_dir": ident.root_dir,
         "start_dir": ident.start_dir,
         "nats": nats_cfg,
         "memory": eff.memory,
+        "docs": eff.docs,
         "instructions_file": str(instructions_file),
         "profile_instructions": profile_instructions,
     }
@@ -293,10 +296,20 @@ def build_mcp_config(ident: ids.Identity, eff: EffectiveProfile,
                 paths.ENV_STATE_DIR: str(paths.state_dir()),
             },
         }
+    if eff.docs.get("routes"):
+        servers["bridge-docs"] = {
+            "command": sys.executable,
+            "args": ["-m", "bridge.docs_mcp"],
+            "env": {
+                paths.ENV_SESSION: str(paths.session_dir(ident.agent_id) / paths.SESSION_FILE),
+                paths.ENV_STATE_DIR: str(paths.state_dir()),
+            },
+        }
     # Workspace-declared MCP connections from the profile chain.
+    reserved = {"bridge-memory", "bridge-docs"}
     for name, cfg in (external_servers if external_servers is not None else eff.mcp_servers).items():
-        if name == "bridge-memory" and eff.memory.get("mcp", True):
-            raise LaunchError("MCP server name 'bridge-memory' is reserved by Bridge memory")
+        if name in reserved and name in servers:
+            raise LaunchError(f"MCP server name {name!r} is reserved by Bridge")
         servers[name] = cfg
     return {"mcpServers": servers}
 
@@ -351,6 +364,19 @@ def launch(plan_obj: LaunchPlan, *, dry_run: bool = False) -> int:
         data={"command": plan_obj.command[0], "parent": ident.parent_agent_id},
     ))
 
+    start_path = Path(ident.start_dir)
+    session_branch = (
+        not ident.parent_agent_id
+        and eff.git.get("auto_branch", True)
+        and gitops.is_repo(start_path)
+    )
+    if session_branch:
+        branch = f"bridge/{ident.agent_id}"
+        if gitops.create_session_branch(start_path, branch):
+            print(f"bridge: checked out {branch}", file=sys.stderr)
+        else:
+            session_branch = False
+
     env = dict(os.environ)
     env.update(plan_obj.env)
 
@@ -364,6 +390,9 @@ def launch(plan_obj: LaunchPlan, *, dry_run: bool = False) -> int:
     except KeyboardInterrupt:
         rc = 130
         outcome, err = "error", call_error("interrupted", "KeyboardInterrupt")
+
+    if session_branch and gitops.has_changes(start_path):
+        gitops.commit_all(start_path, f"bridge: {ident.agent_id} session snapshot (task {ident.task_id})")
 
     ids.set_status(ident.agent_id, "ended" if outcome == "ok" else "error")
     _emit_safely(rep, make_event(

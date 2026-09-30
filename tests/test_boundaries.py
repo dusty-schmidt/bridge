@@ -3,20 +3,33 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 import threading
 import time
 
-from bridge import identity, secrets
+from bridge import gitops, identity, secrets
 from bridge.collector import store
 from bridge.collector.report import query_dimension
 from bridge.cli import main
-from bridge.launcher import plan
+from bridge.docs import DocsError, SessionDocs
+from bridge.launcher import launch, plan
 from bridge.memory.backend import Scope, SqliteMemory
 from bridge.memory.session import SessionError, SessionMemory, _load_session
 from bridge.profile import ProfileError, effective, redacted_view
 from bridge.telemetry import Reporter, make_event
 from bridge.telemetry import outbox
 from bridge.telemetry.wrapper import instrument_call
+
+
+def _init_repo(path):
+    run = lambda *args: subprocess.run(args, cwd=path, check=True, capture_output=True)
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "test@example.com")
+    run("git", "config", "user.name", "Test")
+    (path / "README.md").write_text("hi\n", encoding="utf-8")
+    run("git", "add", "-A")
+    run("git", "commit", "-q", "-m", "init")
 
 
 def profile(directory, content):
@@ -324,3 +337,144 @@ def test_config_cli_prints_effective_profile_with_secret_references_redacted(tmp
     assert "do-not-print-this" not in output
     assert "backend: sqlite" in output
     assert "model: sonnet" in output
+
+
+def _docs(routes, start_dir, **overrides):
+    return SessionDocs(
+        identity={"agent_id": "a"}, profile_version="v1", nats_cfg={}, routes=routes,
+        start_dir=start_dir,
+        reporter=Reporter("nats://unused", publisher=lambda *_: None, background_retry=False),
+        **overrides,
+    )
+
+
+def test_docs_file_route_appends_then_replaces(tmp_path):
+    target = tmp_path / "NOTES.md"
+    doc = _docs({"note": {"path": str(target), "mode": "append"}}, tmp_path)
+
+    doc.document("note", "first")
+    doc.document("note", "second")
+    assert target.read_text(encoding="utf-8") == "first\nsecond\n"
+
+    doc.routes["note"]["mode"] = "replace"
+    doc.document("note", "only")
+    assert target.read_text(encoding="utf-8") == "only\n"
+
+
+def test_docs_relative_path_resolves_against_workspace_not_process_cwd(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    doc = _docs({"note": {"path": "NOTES.md", "mode": "append"}}, workspace)
+
+    doc.document("note", "scoped to the workspace, not cwd")
+
+    assert (workspace / "NOTES.md").read_text(encoding="utf-8") == "scoped to the workspace, not cwd\n"
+    assert not (elsewhere / "NOTES.md").exists()
+
+
+def test_docs_unknown_kind_lists_known_kinds(tmp_path):
+    doc = _docs({"task": {"path": "x", "mode": "append"}}, tmp_path)
+    try:
+        doc.document("missing", "x")
+    except DocsError as e:
+        assert "task" in str(e)
+    else:
+        raise AssertionError("unknown kind should raise DocsError")
+
+
+def test_docs_command_route_passes_message_as_one_argv_element(tmp_path):
+    out_file = tmp_path / "out.txt"
+    script = tmp_path / "capture.py"
+    script.write_text(
+        "import sys, pathlib\npathlib.Path(sys.argv[1]).write_text(sys.argv[2])\n", encoding="utf-8"
+    )
+    template = f"{sys.executable} {script} {out_file} {{message}}"
+    doc = _docs({"note": {"command": template}}, tmp_path)
+
+    tricky = 'hello "world" with spaces'
+    result = doc.document("note", tricky)
+
+    assert result["ok"] is True
+    assert out_file.read_text(encoding="utf-8") == tricky
+
+
+def test_launch_includes_bridge_docs_only_when_routes_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    with_routes = tmp_path / "with-routes"
+    with_routes.mkdir()
+    profile(with_routes, "root: true\ndocs:\n  routes:\n    task:\n      path: TASKS.md\n      mode: append\n")
+    without_routes = tmp_path / "without-routes"
+    without_routes.mkdir()
+    profile(without_routes, "root: true\n")
+
+    with_config = json.loads(plan(with_routes).mcp_file.read_text(encoding="utf-8"))
+    without_config = json.loads(plan(without_routes).mcp_file.read_text(encoding="utf-8"))
+
+    assert with_config["mcpServers"]["bridge-docs"]["args"] == ["-m", "bridge.docs_mcp"]
+    assert "bridge-docs" not in without_config["mcpServers"]
+
+
+def test_gitops_branch_and_commit_cycle(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+
+    assert gitops.is_repo(repo)
+    assert gitops.current_branch(repo) == "main"
+    assert gitops.create_session_branch(repo, "bridge/ag-test")
+    assert gitops.current_branch(repo) == "bridge/ag-test"
+    assert gitops.has_changes(repo) is False
+
+    (repo / "file.txt").write_text("data", encoding="utf-8")
+    assert gitops.has_changes(repo) is True
+    assert gitops.commit_all(repo, "bridge: snapshot")
+    assert gitops.has_changes(repo) is False
+
+
+def test_launch_creates_session_branch_and_auto_commits(tmp_path, monkeypatch):
+    from bridge import launcher
+
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("BRIDGE_TELEMETRY", "off")
+    monkeypatch.setitem(launcher.CLIENTS, "fake", {
+        "cmd": [sys.executable, "-c", "import pathlib; pathlib.Path('touched.txt').write_text('x')"],
+        "mcp": False, "system_prompt": False, "app": "fake",
+    })
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    profile(repo, "root: true\nagent:\n  client: fake\n")
+
+    launch_plan = plan(repo)
+    rc = launch(launch_plan)
+
+    assert rc == 0
+    assert gitops.current_branch(repo) == f"bridge/{launch_plan.identity.agent_id}"
+    assert gitops.has_changes(repo) is False
+    log = subprocess.run(["git", "log", "--oneline", "-1"], cwd=repo,
+                         capture_output=True, text=True, check=True).stdout
+    assert launch_plan.identity.agent_id in log
+
+
+def test_launch_skips_session_branch_when_auto_branch_disabled(tmp_path, monkeypatch):
+    from bridge import launcher
+
+    monkeypatch.setenv("BRIDGE_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("BRIDGE_TELEMETRY", "off")
+    monkeypatch.setitem(launcher.CLIENTS, "fake", {
+        "cmd": [sys.executable, "-c", "pass"],
+        "mcp": False, "system_prompt": False, "app": "fake",
+    })
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    profile(repo, "root: true\nagent:\n  client: fake\ngit:\n  auto_branch: false\n")
+
+    launch_plan = plan(repo)
+    rc = launch(launch_plan)
+
+    assert rc == 0
+    assert gitops.current_branch(repo) == "main"
